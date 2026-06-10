@@ -83,3 +83,39 @@ def test_maximize_csv_field_size_limit():
 )
 def test_flatten(input, expected):
     assert utils.flatten(input) == expected
+
+
+@pytest.mark.parametrize(
+    "input_bytes,expected",
+    [
+        (b'{"a":1}\n{"b":2}', True),
+        (b'{"a":1}\n\n{"b":2}', True),
+        (b'{"a":1}\r\n{"b":2}', True),
+        (b'  {"a":1}\n{"b":2}', True),
+        (b'{"a":1}', False),
+        (b'{"a":1}\n', False),
+        (b'[{"a":1}]', False),
+        (b'{\n"a":1\n}', False),
+        (b"name,age\nAlice,30", False),
+    ],
+)
+def test_detect_ndjson(input_bytes, expected):
+    assert utils._detect_ndjson(input_bytes) is expected
+
+
+@pytest.mark.parametrize(
+    "input_bytes,expected_format",
+    [
+        (b'{"a":1}\n{"b":2}\n', utils.Format.NL),
+        (b'[{"a":1},{"b":2}]', utils.Format.JSON),
+        (b'{"a":1}', utils.Format.JSON),
+        (b'{\n"a":1\n}', utils.Format.JSON),
+    ],
+)
+def test_rows_from_file_ndjson_autodetect(input_bytes, expected_format):
+    fp = io.BytesIO(input_bytes)
+    rows, detected_format = utils.rows_from_file(fp)
+    assert detected_format == expected_format
+    result = list(rows)
+    assert len(result) >= 1
+    assert isinstance(result[0], dict)

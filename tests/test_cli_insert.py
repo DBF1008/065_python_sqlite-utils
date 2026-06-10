@@ -188,6 +188,20 @@ def test_insert_newline_delimited(db_path):
     ] == list(db.query("select foo, n from from_json_nl"))
 
 
+def test_insert_ndjson_autodetect(db_path):
+    result = CliRunner().invoke(
+        cli.cli,
+        ["insert", db_path, "items", "-"],
+        input='{"foo": "bar", "n": 1}\n{"foo": "baz", "n": 2}',
+    )
+    assert result.exit_code == 0, result.output
+    db = Database(db_path)
+    assert [
+        {"foo": "bar", "n": 1},
+        {"foo": "baz", "n": 2},
+    ] == list(db.query("select foo, n from items"))
+
+
 def test_insert_ignore(db_path, tmpdir):
     db = Database(db_path)
     db["dogs"].insert({"id": 1, "name": "Cleo"}, pk="id")

@@ -294,6 +294,24 @@ def _extra_key_strategy(
             yield row_out
 
 
+def _detect_ndjson(first_bytes: bytes) -> bool:
+    stripped = first_bytes.lstrip()
+    if not stripped.startswith(b"{"):
+        return False
+    newline_pos = stripped.find(b"\n")
+    if newline_pos == -1:
+        return False
+    first_line = stripped[:newline_pos].rstrip(b"\r")
+    try:
+        obj = json.loads(first_line)
+    except (json.JSONDecodeError, ValueError):
+        return False
+    if not isinstance(obj, dict):
+        return False
+    rest = stripped[newline_pos + 1 :].lstrip()
+    return rest.startswith(b"{")
+
+
 def rows_from_file(
     fp: BinaryIO,
     format: Optional[Format] = None,
@@ -385,7 +403,8 @@ def rows_from_file(
                 "rows_from_file() requires a file-like object that supports peek(), such as io.BytesIO"
             )
         if first_bytes.startswith(b"[") or first_bytes.startswith(b"{"):
-            # TODO: Detect newline-JSON
+            if first_bytes.startswith(b"{") and _detect_ndjson(first_bytes):
+                return rows_from_file(buffered, format=Format.NL)
             return rows_from_file(buffered, format=Format.JSON)
         else:
             dialect = csv.Sniffer().sniff(

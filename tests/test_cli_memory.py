@@ -116,6 +116,31 @@ def test_memory_json_nl(tmpdir, use_stdin):
 
 
 @pytest.mark.parametrize("use_stdin", (True, False))
+def test_memory_ndjson_autodetect(tmpdir, use_stdin):
+    data = '{"name": "Bants"}\n{"name": "Dori"}'
+    if use_stdin:
+        input = data
+        path = "-"
+        sql_from = "stdin"
+    else:
+        input = None
+        path = str(tmpdir / "chickens.json")
+        with open(path, "w") as fp:
+            fp.write(data)
+        sql_from = "chickens"
+    result = CliRunner().invoke(
+        cli.cli,
+        ["memory", path, "select * from {}".format(sql_from)],
+        input=input,
+    )
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output.strip()) == [
+        {"name": "Bants"},
+        {"name": "Dori"},
+    ]
+
+
+@pytest.mark.parametrize("use_stdin", (True, False))
 def test_memory_csv_encoding(tmpdir, use_stdin):
     latin1_csv = (
         b"date,name,latitude,longitude\n" b"2020-03-04,S\xe3o Paulo,-23.561,-46.645\n"

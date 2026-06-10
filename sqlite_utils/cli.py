@@ -30,6 +30,7 @@ import tabulate
 from .utils import (
     OperationalError,
     _compile_code,
+    _detect_ndjson,
     chunks,
     file_progress,
     find_spatialite,
@@ -1023,6 +1024,13 @@ def insert_upsert_implementation(
     if pk and len(pk) == 1:
         pk = pk[0]
     encoding = encoding or "utf-8-sig"
+
+    if not (csv or tsv or lines or text or nl):
+        ndjson_buffer = io.BufferedReader(file, buffer_size=4096)
+        first_bytes = ndjson_buffer.peek(2048)
+        if _detect_ndjson(first_bytes):
+            nl = True
+        file = ndjson_buffer
 
     # The --sniff option needs us to buffer the file to peek ahead
     sniff_buffer = None
