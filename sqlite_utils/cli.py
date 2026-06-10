@@ -961,6 +961,12 @@ def insert_upsert_options(*, require_pk=False):
                     default=False,
                     help="Apply STRICT mode to created table",
                 ),
+                click.option(
+                    "--schema",
+                    "schema_only",
+                    is_flag=True,
+                    help="Preview the schema that would result from this operation without modifying the database",
+                ),
             )
         ):
             fn = decorator(fn)
@@ -1005,8 +1011,21 @@ def insert_upsert_implementation(
     bulk_sql=None,
     functions=None,
     strict=False,
+    schema_only=False,
 ):
-    db = sqlite_utils.Database(path)
+    existing_columns = None
+    if schema_only:
+        if os.path.exists(path):
+            real_db = sqlite_utils.Database(path)
+            if table in real_db.table_names():
+                existing_columns = {col.name for col in real_db[table].columns}
+                create_sql = real_db[table].schema
+            real_db = None
+        db = sqlite_utils.Database(":memory:")
+        if existing_columns is not None:
+            db.execute(create_sql)
+    else:
+        db = sqlite_utils.Database(path)
     _register_db_for_cleanup(db)
     _load_extensions(db, load_extension)
     _maybe_register_functions(db, functions)
@@ -1178,6 +1197,29 @@ def insert_upsert_implementation(
         if tracker is not None:
             db.table(table).transform(types=tracker.types)
 
+        if schema_only:
+            t = db[table]
+            columns = [
+                {
+                    "name": col.name,
+                    "type": col.type,
+                    "notnull": col.notnull,
+                    "default_value": col.default_value,
+                    "is_pk": col.is_pk,
+                    "new": existing_columns is None
+                    or col.name not in existing_columns,
+                }
+                for col in t.columns
+            ]
+            result = {
+                "table": table,
+                "new_table": existing_columns is None,
+                "columns": columns,
+                "primary_keys": t.pks,
+                "schema": t.schema,
+            }
+            click.echo(json.dumps(result, indent=2))
+
         # Clean up open file-like objects
         if sniff_buffer:
             sniff_buffer.close()
@@ -1247,6 +1289,7 @@ def insert(
     not_null,
     default,
     strict,
+    schema_only,
 ):
     """
     Insert records from FILE into a table, creating the table if it
@@ -1327,6 +1370,7 @@ def insert(
             not_null=not_null,
             default=default,
             strict=strict,
+            schema_only=schema_only,
         )
     except UnicodeDecodeError as ex:
         raise click.ClickException(UNICODE_ERROR.format(ex))
@@ -1364,6 +1408,7 @@ def upsert(
     load_extension,
     silent,
     strict,
+    schema_only,
 ):
     """
     Upsert records based on their primary key. Works like 'insert' but if
@@ -1410,6 +1455,7 @@ def upsert(
             load_extension=load_extension,
             silent=silent,
             strict=strict,
+            schema_only=schema_only,
         )
     except UnicodeDecodeError as ex:
         raise click.ClickException(UNICODE_ERROR.format(ex))

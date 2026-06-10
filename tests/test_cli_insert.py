@@ -1,6 +1,7 @@
 from sqlite_utils import cli, Database
 from click.testing import CliRunner
 import json
+import os
 import pytest
 import subprocess
 import sys
@@ -597,3 +598,143 @@ def test_insert_streaming_batch_size_1(db_path):
     proc.stdin.close()
     proc.wait()
     assert proc.returncode == 0
+
+
+def test_insert_schema_json_new_table(tmpdir):
+    db_path = str(tmpdir / "test.db")
+    result = CliRunner().invoke(
+        cli.cli,
+        ["insert", db_path, "people", "-", "--pk", "id", "--schema"],
+        input=json.dumps([{"id": 1, "name": "Alice", "score": 3.5}]),
+    )
+    assert result.exit_code == 0
+    output = json.loads(result.output)
+    assert output["table"] == "people"
+    assert output["new_table"] is True
+    assert output["primary_keys"] == ["id"]
+    col_names = [c["name"] for c in output["columns"]]
+    assert col_names == ["id", "name", "score"]
+    col_types = {c["name"]: c["type"] for c in output["columns"]}
+    assert col_types == {"id": "INTEGER", "name": "TEXT", "score": "REAL"}
+    assert all(c["new"] is True for c in output["columns"])
+    assert not os.path.exists(db_path)
+
+
+def test_insert_schema_csv_detect_types(tmpdir):
+    db_path = str(tmpdir / "test.db")
+    result = CliRunner().invoke(
+        cli.cli,
+        ["insert", db_path, "data", "-", "--csv", "--schema"],
+        input="id,name,age\n1,Bob,30\n2,Carol,25\n",
+    )
+    assert result.exit_code == 0
+    output = json.loads(result.output)
+    col_types = {c["name"]: c["type"] for c in output["columns"]}
+    assert col_types["id"] == "INTEGER"
+    assert col_types["name"] == "TEXT"
+    assert col_types["age"] == "INTEGER"
+
+
+def test_insert_schema_csv_no_detect_types(tmpdir):
+    db_path = str(tmpdir / "test.db")
+    result = CliRunner().invoke(
+        cli.cli,
+        ["insert", db_path, "data", "-", "--csv", "--no-detect-types", "--schema"],
+        input="id,name,age\n1,Bob,30\n",
+    )
+    assert result.exit_code == 0
+    output = json.loads(result.output)
+    col_types = {c["name"]: c["type"] for c in output["columns"]}
+    assert col_types["id"] == "TEXT"
+    assert col_types["age"] == "TEXT"
+
+
+def test_insert_schema_flatten(tmpdir):
+    db_path = str(tmpdir / "test.db")
+    result = CliRunner().invoke(
+        cli.cli,
+        ["insert", db_path, "data", "-", "--flatten", "--schema"],
+        input=json.dumps({"a": {"b": 1, "c": "hello"}, "d": 2}),
+    )
+    assert result.exit_code == 0
+    output = json.loads(result.output)
+    col_names = sorted(c["name"] for c in output["columns"])
+    assert col_names == ["a_b", "a_c", "d"]
+
+
+def test_insert_schema_convert(tmpdir):
+    db_path = str(tmpdir / "test.db")
+    result = CliRunner().invoke(
+        cli.cli,
+        [
+            "insert", db_path, "data", "-",
+            "--convert", "row['name'] = row['name'].upper()",
+            "--schema",
+        ],
+        input=json.dumps([{"name": "alice", "age": 30}]),
+    )
+    assert result.exit_code == 0
+    output = json.loads(result.output)
+    col_names = [c["name"] for c in output["columns"]]
+    assert "name" in col_names
+    assert "age" in col_names
+
+
+def test_insert_schema_existing_table_alter(tmpdir):
+    db_path = str(tmpdir / "test.db")
+    db = Database(db_path)
+    db["people"].insert({"id": 1, "name": "Alice"}, pk="id")
+
+    result = CliRunner().invoke(
+        cli.cli,
+        ["insert", db_path, "people", "-", "--alter", "--schema"],
+        input=json.dumps([{"id": 2, "name": "Bob", "email": "bob@test.com"}]),
+    )
+    assert result.exit_code == 0
+    output = json.loads(result.output)
+    assert output["new_table"] is False
+    col_map = {c["name"]: c for c in output["columns"]}
+    assert col_map["id"]["new"] is False
+    assert col_map["name"]["new"] is False
+    assert col_map["email"]["new"] is True
+    # Real database should not be modified
+    real_db = Database(db_path)
+    assert "email" not in {c.name for c in real_db["people"].columns}
+
+
+def test_insert_schema_pk_not_null_default_strict(tmpdir):
+    db_path = str(tmpdir / "test.db")
+    result = CliRunner().invoke(
+        cli.cli,
+        [
+            "insert", db_path, "data", "-",
+            "--pk", "id",
+            "--not-null", "name",
+            "--default", "status", "active",
+            "--strict",
+            "--schema",
+        ],
+        input=json.dumps([{"id": 1, "name": "Alice", "status": "active"}]),
+    )
+    assert result.exit_code == 0
+    output = json.loads(result.output)
+    assert output["primary_keys"] == ["id"]
+    col_map = {c["name"]: c for c in output["columns"]}
+    assert col_map["name"]["notnull"] == 1
+    assert col_map["status"]["default_value"] == "'active'"
+    assert "STRICT" in output["schema"]
+
+
+def test_upsert_schema(tmpdir):
+    db_path = str(tmpdir / "test.db")
+    result = CliRunner().invoke(
+        cli.cli,
+        ["upsert", db_path, "people", "-", "--pk", "id", "--schema"],
+        input=json.dumps([{"id": 1, "name": "Alice"}]),
+    )
+    assert result.exit_code == 0
+    output = json.loads(result.output)
+    assert output["table"] == "people"
+    assert output["new_table"] is True
+    assert output["primary_keys"] == ["id"]
+    assert not os.path.exists(db_path)
