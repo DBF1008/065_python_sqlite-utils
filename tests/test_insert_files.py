@@ -169,3 +169,48 @@ def test_insert_files_bad_text_encoding_error():
         assert result.output.strip().startswith(
             "Error: Could not read file '{}' as text".format(str(latin.resolve()))
         )
+
+
+@pytest.mark.skipif(
+    sys.platform.startswith("win"),
+    reason="Windows has a different way of handling default encodings",
+)
+def test_insert_files_dir_bad_encoding_no_partial_results():
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        tmpdir = pathlib.Path(".")
+        db_path = str(tmpdir / "files.db")
+        (tmpdir / "good.txt").write_text("Hello world", "utf-8")
+        (tmpdir / "bad.txt").write_bytes(b"S\xe3o Paulo")
+        result = runner.invoke(
+            cli.cli,
+            ["insert-files", db_path, "files", str(tmpdir), "--text"],
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 1, result.output
+        assert "bad.txt" in result.output
+        assert "Could not read file" in result.output
+        db = Database(db_path)
+        assert "files" not in db.table_names()
+
+
+@pytest.mark.skipif(
+    sys.platform.startswith("win"),
+    reason="Windows has a different way of handling default encodings",
+)
+def test_insert_files_dir_bad_encoding_binary_mode_succeeds():
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        tmpdir = pathlib.Path(".")
+        db_path = str(tmpdir / "files.db")
+        (tmpdir / "good.txt").write_text("Hello world", "utf-8")
+        (tmpdir / "bad.txt").write_bytes(b"S\xe3o Paulo")
+        result = runner.invoke(
+            cli.cli,
+            ["insert-files", db_path, "files", str(tmpdir)],
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 0, result.output
+        db = Database(db_path)
+        assert "files" in db.table_names()
+        assert db["files"].count == 2

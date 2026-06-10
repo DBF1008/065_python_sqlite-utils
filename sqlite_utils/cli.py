@@ -2755,6 +2755,25 @@ def insert_files(
     # Load all paths so we can show a progress bar
     paths_and_relative_paths = list(yield_paths_and_relative_paths())
 
+    # Pre-validate text encoding before any DB writes to avoid partial inserts
+    has_content_text = any(
+        (coldef.rsplit(":", 1)[1] if ":" in coldef else coldef) == "content_text"
+        for coldef in column
+    )
+    if has_content_text:
+        for filepath, relative_path in paths_and_relative_paths:
+            if filepath == "-":
+                continue
+            resolved = filepath.resolve()
+            try:
+                resolved.read_text(encoding=encoding)
+            except UnicodeDecodeError as e:
+                raise click.ClickException(
+                    UNICODE_ERROR.format(
+                        "Could not read file '{}' as text\n\n{}".format(resolved, e)
+                    )
+                )
+
     with progressbar(paths_and_relative_paths, silent=silent) as bar:
 
         def to_insert():
