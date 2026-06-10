@@ -2932,6 +2932,16 @@ def _analyze(db, tables, columns, save, common_limit=10, no_most=False, no_least
             + "\n"
         )
         click.echo(details)
+    if save and todo:
+        placeholders = " OR ".join(
+            "([table] = ? AND [column] = ?)" for _ in todo
+        )
+        delete_args = [v for pair in todo for v in pair]
+        db.execute(
+            "DELETE FROM [_analyze_tables_] WHERE NOT ({})".format(placeholders),
+            delete_args,
+        )
+        db.conn.commit()
 
 
 @cli.command()

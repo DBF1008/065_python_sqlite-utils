@@ -280,6 +280,44 @@ def test_analyze_table_column_all_nulls(big_db_to_analyze_path):
     )
 
 
+def test_analyze_table_save_removes_stale_columns(db_to_analyze_path):
+    runner = CliRunner()
+    result = runner.invoke(
+        cli.cli, ["analyze-tables", db_to_analyze_path, "--save"]
+    )
+    assert result.exit_code == 0
+    rows = list(Database(db_to_analyze_path)["_analyze_tables_"].rows)
+    assert len(rows) == 3
+    assert {r["column"] for r in rows} == {"id", "owner", "size"}
+
+    result = runner.invoke(
+        cli.cli, ["analyze-tables", db_to_analyze_path, "-c", "owner", "--save"]
+    )
+    assert result.exit_code == 0
+    rows = list(Database(db_to_analyze_path)["_analyze_tables_"].rows)
+    assert len(rows) == 1
+    assert rows[0]["column"] == "owner"
+
+
+def test_analyze_table_save_removes_stale_tables(tmpdir):
+    path = str(tmpdir / "test.db")
+    db = Database(path)
+    db["t1"].insert({"a": 1, "b": 2})
+    db["t2"].insert({"c": 3})
+    runner = CliRunner()
+
+    result = runner.invoke(cli.cli, ["analyze-tables", path, "--save"])
+    assert result.exit_code == 0
+    rows = list(Database(path)["_analyze_tables_"].rows)
+    assert {r["table"] for r in rows} == {"t1", "t2"}
+
+    result = runner.invoke(cli.cli, ["analyze-tables", path, "t1", "--save"])
+    assert result.exit_code == 0
+    rows = list(Database(path)["_analyze_tables_"].rows)
+    assert all(r["table"] == "t1" for r in rows)
+    assert {r["column"] for r in rows} == {"a", "b"}
+
+
 @pytest.mark.parametrize(
     "args,expected_error",
     (
