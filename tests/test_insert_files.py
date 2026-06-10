@@ -169,3 +169,157 @@ def test_insert_files_bad_text_encoding_error():
         assert result.output.strip().startswith(
             "Error: Could not read file '{}' as text".format(str(latin.resolve()))
         )
+
+
+def _setup_filter_tree(tmpdir):
+    (tmpdir / "hello.txt").write_text("hello", "utf-8")
+    (tmpdir / "world.py").write_text("world", "utf-8")
+    (tmpdir / "debug.log").write_text("log1", "utf-8")
+    (tmpdir / "sub").mkdir()
+    (tmpdir / "sub" / "nested.txt").write_text("nested", "utf-8")
+    (tmpdir / "sub" / "nested.log").write_text("log2", "utf-8")
+    (tmpdir / "node_modules").mkdir()
+    (tmpdir / "node_modules" / "pkg.js").write_text("pkg", "utf-8")
+
+
+def test_insert_files_include():
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        tmpdir = pathlib.Path(".")
+        _setup_filter_tree(tmpdir)
+        db_path = str(tmpdir / "files.db")
+        result = runner.invoke(
+            cli.cli,
+            ["insert-files", db_path, "files", str(tmpdir), "--include", "*.txt", "--silent"],
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 0, result.output
+        db = Database(db_path)
+        paths = {r["path"] for r in db["files"].rows}
+        assert paths == {"hello.txt", os.path.join("sub", "nested.txt")}
+
+
+def test_insert_files_exclude():
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        tmpdir = pathlib.Path(".")
+        _setup_filter_tree(tmpdir)
+        db_path = str(tmpdir / "files.db")
+        result = runner.invoke(
+            cli.cli,
+            ["insert-files", db_path, "files", str(tmpdir), "--exclude", "*.log", "--silent"],
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 0, result.output
+        db = Database(db_path)
+        paths = {r["path"] for r in db["files"].rows}
+        assert "debug.log" not in paths
+        assert os.path.join("sub", "nested.log") not in paths
+        assert "hello.txt" in paths
+        assert "world.py" in paths
+
+
+def test_insert_files_exclude_directory():
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        tmpdir = pathlib.Path(".")
+        _setup_filter_tree(tmpdir)
+        db_path = str(tmpdir / "files.db")
+        result = runner.invoke(
+            cli.cli,
+            ["insert-files", db_path, "files", str(tmpdir), "--exclude", "node_modules", "--silent"],
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 0, result.output
+        db = Database(db_path)
+        paths = {r["path"] for r in db["files"].rows}
+        assert all("node_modules" not in p for p in paths)
+        assert "hello.txt" in paths
+
+
+def test_insert_files_include_and_exclude():
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        tmpdir = pathlib.Path(".")
+        _setup_filter_tree(tmpdir)
+        db_path = str(tmpdir / "files.db")
+        result = runner.invoke(
+            cli.cli,
+            [
+                "insert-files", db_path, "files", str(tmpdir),
+                "--include", "*.txt",
+                "--exclude", "nested*",
+                "--silent",
+            ],
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 0, result.output
+        db = Database(db_path)
+        paths = {r["path"] for r in db["files"].rows}
+        assert paths == {"hello.txt"}
+
+
+def test_insert_files_stdin_ignores_filters():
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        tmpdir = pathlib.Path(".")
+        db_path = str(tmpdir / "files.db")
+        result = runner.invoke(
+            cli.cli,
+            [
+                "insert-files", db_path, "files", "-",
+                "--name", "test.log",
+                "--include", "*.txt",
+                "--silent",
+            ],
+            catch_exceptions=False,
+            input="stdin content",
+        )
+        assert result.exit_code == 0, result.output
+        db = Database(db_path)
+        rows = list(db["files"].rows)
+        assert len(rows) == 1
+        assert rows[0]["path"] == "test.log"
+
+
+def test_insert_files_single_file_ignores_filters():
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        tmpdir = pathlib.Path(".")
+        (tmpdir / "only.log").write_text("single", "utf-8")
+        db_path = str(tmpdir / "files.db")
+        result = runner.invoke(
+            cli.cli,
+            [
+                "insert-files", db_path, "files", str(tmpdir / "only.log"),
+                "--include", "*.txt",
+                "--silent",
+            ],
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 0, result.output
+        db = Database(db_path)
+        rows = list(db["files"].rows)
+        assert len(rows) == 1
+
+
+def test_insert_files_multiple_include_patterns():
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        tmpdir = pathlib.Path(".")
+        _setup_filter_tree(tmpdir)
+        db_path = str(tmpdir / "files.db")
+        result = runner.invoke(
+            cli.cli,
+            [
+                "insert-files", db_path, "files", str(tmpdir),
+                "--include", "*.txt",
+                "--include", "*.py",
+                "--silent",
+            ],
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 0, result.output
+        db = Database(db_path)
+        paths = {r["path"] for r in db["files"].rows}
+        assert paths == {"hello.txt", "world.py", os.path.join("sub", "nested.txt")}

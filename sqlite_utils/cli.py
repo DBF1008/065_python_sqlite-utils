@@ -3,6 +3,7 @@ from typing import Any
 import click
 from click_default_group import DefaultGroup
 from datetime import datetime, timezone
+import fnmatch
 import hashlib
 import pathlib
 from runpy import run_module
@@ -2700,6 +2701,18 @@ def extract(
     "--encoding",
     help="Character encoding for input, defaults to utf-8",
 )
+@click.option(
+    "--include",
+    type=str,
+    multiple=True,
+    help="Only include files matching this glob pattern",
+)
+@click.option(
+    "--exclude",
+    type=str,
+    multiple=True,
+    help="Exclude files matching this glob pattern",
+)
 @click.option("-s", "--silent", is_flag=True, help="Don't show a progress bar")
 @load_extension_option
 def insert_files(
@@ -2714,6 +2727,8 @@ def insert_files(
     name,
     text,
     encoding,
+    include,
+    exclude,
     silent,
     load_extension,
 ):
@@ -2746,8 +2761,22 @@ def insert_files(
             if f_or_d == "-":
                 yield "-", "-"
             elif path.is_dir():
-                for subpath in path.rglob("*"):
-                    if subpath.is_file():
+                for dirpath_str, dirnames, filenames in os.walk(path):
+                    if exclude:
+                        dirnames[:] = [
+                            d for d in dirnames
+                            if not any(fnmatch.fnmatch(d, pat) for pat in exclude)
+                        ]
+                    for filename in sorted(filenames):
+                        if include and not any(
+                            fnmatch.fnmatch(filename, pat) for pat in include
+                        ):
+                            continue
+                        if exclude and any(
+                            fnmatch.fnmatch(filename, pat) for pat in exclude
+                        ):
+                            continue
+                        subpath = pathlib.Path(dirpath_str) / filename
                         yield subpath, subpath.relative_to(path)
             elif path.is_file():
                 yield path, path
