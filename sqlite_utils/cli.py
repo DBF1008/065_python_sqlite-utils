@@ -38,6 +38,7 @@ from .utils import (
     decode_base64_values,
     progressbar,
     rows_from_file,
+    RowError,
     Format,
     TypeTracker,
 )
@@ -1057,13 +1058,28 @@ def insert_upsert_implementation(
                 reader = itertools.chain([first_row], reader)
             else:
                 headers = first_row
+            def _check_extra_fields(reader, headers):
+                for row in reader:
+                    if len(row) > len(headers):
+                        extras = row[len(headers):]
+                        d = dict(zip(headers, row))
+                        raise RowError(
+                            "Row {} contained these extra values: {}".format(
+                                d, extras
+                            )
+                        )
+                    yield row
+
             if empty_null:
                 docs = (
                     dict(zip(headers, [None if cell == "" else cell for cell in row]))
-                    for row in reader
+                    for row in _check_extra_fields(reader, headers)
                 )
             else:
-                docs = (dict(zip(headers, row)) for row in reader)
+                docs = (
+                    dict(zip(headers, row))
+                    for row in _check_extra_fields(reader, headers)
+                )
             # detect_types is now the default, unless --no-detect-types is passed
             if not no_detect_types:
                 tracker = TypeTracker()
@@ -1153,6 +1169,8 @@ def insert_upsert_implementation(
                 docs, pk=pk, batch_size=batch_size, alter=alter, **extra_kwargs
             )
         except Exception as e:
+            if isinstance(e, RowError):
+                raise click.ClickException(str(e))
             if (
                 isinstance(e, OperationalError)
                 and e.args

@@ -364,16 +364,14 @@ def rows_from_file(
         return _CloseableIterator(iter(rows), decoded_fp), Format.CSV
     elif format == Format.TSV:
         rows, _ = rows_from_file(
-            fp, format=Format.CSV, dialect=csv.excel_tab, encoding=encoding
+            fp,
+            format=Format.CSV,
+            dialect=csv.excel_tab,
+            encoding=encoding,
+            ignore_extras=ignore_extras,
+            extras_key=extras_key,
         )
-        return (
-            _extra_key_strategy(
-                cast(Iterable[Dict[Optional[str], object]], rows),
-                ignore_extras,
-                extras_key,
-            ),
-            Format.TSV,
-        )
+        return rows, Format.TSV
     elif format is None:
         # Detect the format, then call this recursively
         buffered = io.BufferedReader(cast(io.RawIOBase, fp), buffer_size=4096)
@@ -392,18 +390,15 @@ def rows_from_file(
                 first_bytes.decode(encoding or "utf-8-sig", "ignore")
             )
             rows, _ = rows_from_file(
-                buffered, format=Format.CSV, dialect=dialect, encoding=encoding
+                buffered,
+                format=Format.CSV,
+                dialect=dialect,
+                encoding=encoding,
+                ignore_extras=ignore_extras,
+                extras_key=extras_key,
             )
-            # Make sure we return the format we detected
             detected_format = Format.TSV if dialect.delimiter == "\t" else Format.CSV
-            return (
-                _extra_key_strategy(
-                    cast(Iterable[Dict[Optional[str], object]], rows),
-                    ignore_extras,
-                    extras_key,
-                ),
-                detected_format,
-            )
+            return rows, detected_format
     else:
         raise RowsFromFileError("Bad format")
 

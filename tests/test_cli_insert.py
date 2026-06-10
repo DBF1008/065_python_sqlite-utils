@@ -243,7 +243,7 @@ def test_insert_csv_empty_null(db_path, empty_null):
         cli.cli,
         ["insert", db_path, "data", "-"] + options,
         catch_exceptions=False,
-        input="foo,bar,baz\n1,,cat,dog",
+        input="foo,bar,baz\n1,,cat",
     )
     assert result.exit_code == 0
     db = Database(db_path)
@@ -597,3 +597,31 @@ def test_insert_streaming_batch_size_1(db_path):
     proc.stdin.close()
     proc.wait()
     assert proc.returncode == 0
+
+
+@pytest.mark.parametrize(
+    "content,options",
+    [
+        ("foo,bar\n1,2,extra", ["--csv"]),
+        ("foo\tbar\n1\t2\textra", ["--tsv"]),
+        ("foo,bar\n1,2,extra", ["--csv", "--empty-null"]),
+    ],
+)
+def test_insert_csv_tsv_extra_fields_error(content, options, db_path):
+    result = CliRunner().invoke(
+        cli.cli,
+        ["insert", db_path, "data", "-"] + options + ["--no-detect-types"],
+        input=content,
+    )
+    assert result.exit_code == 1
+    assert "extra values" in result.output
+
+
+def test_insert_csv_no_headers_extra_fields_error(db_path):
+    result = CliRunner().invoke(
+        cli.cli,
+        ["insert", db_path, "data", "-", "--csv", "--no-headers", "--no-detect-types"],
+        input="1,2\n3,4,extra",
+    )
+    assert result.exit_code == 1
+    assert "extra values" in result.output
